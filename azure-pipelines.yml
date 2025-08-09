@@ -1,10 +1,11 @@
 trigger: none
 
 parameters:
-  - name: areaPath
+  - name: parentWorkItem
     type: string
-    default: 'Enterprise Data Warehouse\\Data and Analytics'
-    displayName: 'Choose Area Path'
+    default: '108342'
+    displayName: 'Parent Work Item ID or URL (Epic or Feature)'
+
   - name: featureTitle
     type: string
     default: ''
@@ -17,18 +18,41 @@ steps:
 - script: |
     set -euo pipefail
 
-    # Parameters from pipeline input
-    AREA_PATH="${{ parameters.areaPath }}"
+    ORG="sovereignhousingassociationvsts"
+    PROJECT="Enterprise Data Warehouse"
+
     FEATURE_TITLE="${{ parameters.featureTitle }}"
-    
+    PARENT_INPUT="${{ parameters.parentWorkItem }}"
+
     if [ -z "$FEATURE_TITLE" ]; then
       echo "❌ Feature Title parameter is required."
       exit 1
     fi
 
-    ORG="sovereignhousingassociationvsts"
-    PROJECT="Enterprise%20Data%20Warehouse"
-    EPIC_ID="108342"
+    # Extract work item ID from input (handles either ID or URL)
+    if [[ "$PARENT_INPUT" =~ ([0-9]+)$ ]]; then
+      PARENT_ID="${BASH_REMATCH[1]}"
+    else
+      echo "❌ Could not extract work item ID from input: $PARENT_INPUT"
+      exit 1
+    fi
+
+    echo "Using parent work item ID: $PARENT_ID"
+
+    # Fetch parent work item details to get Area Path and URL
+    PARENT_DETAIL=$(curl -s -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
+      "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$PARENT_ID?api-version=7.0")
+
+    AREA_PATH=$(echo "$PARENT_DETAIL" | jq -r '.fields["System.AreaPath"]')
+    PARENT_URL=$(echo "$PARENT_DETAIL" | jq -r '.url')
+
+    if [ -z "$AREA_PATH" ] || [ "$AREA_PATH" = "null" ]; then
+      echo "❌ Failed to retrieve Area Path for work item $PARENT_ID"
+      exit 1
+    fi
+
+    echo "Parent Area Path: $AREA_PATH"
+    echo "Parent URL: $PARENT_URL"
 
     FEATURE_DESC="As per ADO template"
 
@@ -47,13 +71,13 @@ steps:
 
     echo "Creating Feature: $FEATURE_TITLE in Area Path: $AREA_PATH"
 
-    FEATURE_JSON=$(jq -n --arg title "$FEATURE_TITLE" --arg desc "$FEATURE_DESC" --arg area "$AREA_PATH" --arg epic_url "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$EPIC_ID" '[ 
+    FEATURE_JSON=$(jq -n --arg title "$FEATURE_TITLE" --arg desc "$FEATURE_DESC" --arg area "$AREA_PATH" --arg parent_url "$PARENT_URL" '[ 
       {"op":"add","path":"/fields/System.Title","value":$title},
       {"op":"add","path":"/fields/System.Description","value":$desc},
       {"op":"add","path":"/fields/System.AreaPath","value":$area},
       {"op":"add","path":"/relations/-","value":{
         "rel":"System.LinkTypes.Hierarchy-Reverse",
-        "url": $epic_url
+        "url": $parent_url
       }}
     ]')
 
