@@ -11,14 +11,11 @@ steps:
   displayName: 'Install jq'
 
 - script: |
-    # ========================
-    # CONFIGURATION
-    # ========================
     ORG="sovereignhousingassociationvsts"
-    PROJECT="Enterprise%20Data%20Warehouse"
+    PROJECT="Enterprise Data Warehouse"  # decoded space here
     AREA_PATH="Enterprise Data Warehouse\\Data and Analytics"
 
-    EPIC_ID="108342"  # GIS Test epic ID
+    EPIC_ID="108342"
 
     FEATURE_TITLE="New Project Name"
     FEATURE_DESC="As per ADO template"
@@ -36,25 +33,26 @@ steps:
       "Story 10 Sign off|Completion of testing and final sign off"
     )
 
-    # ========================
-    # CREATE FEATURE (child of Epic)
-    # ========================
     echo "Creating Feature: $FEATURE_TITLE"
+
+    read -r -d '' FEATURE_PATCH << EOM
+[
+  {"op":"add","path":"/fields/System.Title","value":"$FEATURE_TITLE"},
+  {"op":"add","path":"/fields/System.Description","value":"$FEATURE_DESC"},
+  {"op":"add","path":"/fields/System.AreaPath","value":"$AREA_PATH"},
+  {"op":"add","path":"/relations/-","value":{
+    "rel":"System.LinkTypes.Hierarchy-Reverse",
+    "url":"https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workItems/$EPIC_ID"
+  }}
+]
+EOM
 
     FEATURE_JSON=$(curl -s \
       -X POST \
       -H "Content-Type: application/json-patch+json" \
       -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
-      --data '[ 
-        {"op":"add","path":"/fields/System.Title","value":"'"$FEATURE_TITLE"'"},
-        {"op":"add","path":"/fields/System.Description","value":"'"$FEATURE_DESC"'"},
-        {"op":"add","path":"/fields/System.AreaPath","value":"'"$AREA_PATH"'"},
-        {"op":"add","path":"/relations/-","value":{ 
-          "rel":"System.LinkTypes.Hierarchy-Reverse", 
-          "url":"https://dev.azure.com/'"$ORG"'/'"$PROJECT"'/_apis/wit/workItems/'"$EPIC_ID"'"
-        }}
-      ]' \
-      "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/\$Feature?api-version=7.0")
+      --data "$FEATURE_PATCH" \
+      "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/\$feature?api-version=7.0")
 
     FEATURE_ID=$(echo "$FEATURE_JSON" | jq -r '.id')
 
@@ -66,28 +64,29 @@ steps:
 
     echo "✅ Feature created with ID: $FEATURE_ID"
 
-    # ========================
-    # CREATE USER STORIES
-    # ========================
     echo "Creating User Stories..."
     for story in "${USER_STORIES[@]}"; do
       TITLE="${story%%|*}"
       DESC="${story#*|}"
 
+      read -r -d '' STORY_PATCH << EOM
+[
+  {"op":"add","path":"/fields/System.Title","value":"$TITLE"},
+  {"op":"add","path":"/fields/System.Description","value":"$DESC"},
+  {"op":"add","path":"/fields/System.AreaPath","value":"$AREA_PATH"},
+  {"op":"add","path":"/relations/-","value":{
+    "rel":"System.LinkTypes.Hierarchy-Reverse",
+    "url":"https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workItems/$FEATURE_ID"
+  }}
+]
+EOM
+
       US_JSON=$(curl -s \
         -X POST \
         -H "Content-Type: application/json-patch+json" \
         -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
-        --data '[ 
-          {"op":"add","path":"/fields/System.Title","value":"'"$TITLE"'"},
-          {"op":"add","path":"/fields/System.Description","value":"'"$DESC"'"},
-          {"op":"add","path":"/fields/System.AreaPath","value":"'"$AREA_PATH"'"},
-          {"op":"add","path":"/relations/-","value":{ 
-            "rel":"System.LinkTypes.Hierarchy-Reverse", 
-            "url":"https://dev.azure.com/'"$ORG"'/'"$PROJECT"'/_apis/wit/workItems/'"$FEATURE_ID"'"
-          }}
-        ]' \
-        "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/\$Story?api-version=7.0")
+        --data "$STORY_PATCH" \
+        "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/\$story?api-version=7.0")
 
       US_ID=$(echo "$US_JSON" | jq -r '.id')
       if [ "$US_ID" = "null" ] || [ -z "$US_ID" ]; then
