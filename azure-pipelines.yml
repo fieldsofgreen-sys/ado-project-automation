@@ -1,0 +1,107 @@
+trigger: none
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+# 1. Install jq on the agent
+- script: |
+    echo "Installing jq..."
+    sudo apt-get update
+    sudo apt-get install -y jq
+  displayName: 'Install jq'
+
+# 2. Create Feature and User Stories
+- script: |
+    # ========================
+    # CONFIGURATION
+    # ========================
+    ORG="sovereignhousingassociationvsts"
+    PROJECT="Enterprise%20Data%20Warehouse"
+    AREA_PATH="Enterprise Data Warehouse\\Data and Analytics"
+
+    EPIC_ID="108342"  # GIS Test epic ID
+
+    FEATURE_TITLE="New Project Name"
+    FEATURE_DESC="As per ADO template"
+
+    USER_STORIES=(
+      "Story 1 Discovery|Initial background work as needed"
+      "Story 2 Scoping|Documented in ADO Feature"
+      "Story 3 Report mock-up|Evidenced in PPT or PBI"
+      "Story 4 Sourcing data|XL template complete and request raised with Data Engineers"
+      "Story 5 Data modelling|XL template complete and request raised with Data Engineers"
+      "Story 6 Definitions documented|Word document with sign off from stakeholders. Once agreed, enter into Purview"
+      "Story 7 Data validation|Dev dataset back from Data Engineers for initial data checks. Advise when complete"
+      "Story 8 DAX measure creation|Master dataset back from Data Engineers for DAX measure creation. Any amendments, notify Data Engineers"
+      "Story 9 UAT report build|Build report out from master dataset. Arrange end user testing"
+      "Story 10 Sign off|Completion of testing and final sign off"
+    )
+
+    # ========================
+    # CREATE FEATURE (child of Epic)
+    # ========================
+    echo "Creating Feature: $FEATURE_TITLE"
+
+    FEATURE_JSON=$(curl -s \
+      -X POST \
+      -H "Content-Type: application/json-patch+json" \
+      -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
+      --data "[ \
+        {\"op\":\"add\",\"path\":\"/fields/System.Title\",\"value\":\"$FEATURE_TITLE\"}, \
+        {\"op\":\"add\",\"path\":\"/fields/System.Description\",\"value\":\"$FEATURE_DESC\"}, \
+        {\"op\":\"add\",\"path\":\"/fields/System.AreaPath\",\"value\":\"$AREA_PATH\"}, \
+        {\"op\":\"add\",\"path\":\"/relations/-\",\"value\":{ \
+          \"rel\":\"System.LinkTypes.Hierarchy-Reverse\", \
+          \"url\":\"https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workItems/$EPIC_ID\" \
+        }} \
+      ]" \
+      "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/\$Feature?api-version=7.0")
+
+    FEATURE_ID=$(echo "$FEATURE_JSON" | jq -r '.id')
+
+    if [ "$FEATURE_ID" = "null" ] || [ -z "$FEATURE_ID" ]; then
+      echo "❌ Failed to create Feature."
+      echo "$FEATURE_JSON"
+      exit 1
+    fi
+
+    echo "✅ Feature created with ID: $FEATURE_ID"
+
+    # ========================
+    # CREATE USER STORIES
+    # ========================
+    echo "Creating User Stories..."
+    for story in "${USER_STORIES[@]}"; do
+      TITLE="${story%%|*}"
+      DESC="${story#*|}"
+
+      US_JSON=$(curl -s \
+        -X POST \
+        -H "Content-Type: application/json-patch+json" \
+        -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
+        --data "[ \
+          {\"op\":\"add\",\"path\":\"/fields/System.Title\",\"value\":\"$TITLE\"}, \
+          {\"op\":\"add\",\"path\":\"/fields/System.Description\",\"value\":\"$DESC\"}, \
+          {\"op\":\"add\",\"path\":\"/fields/System.AreaPath\",\"value\":\"$AREA_PATH\"}, \
+          {\"op\":\"add\",\"path\":\"/relations/-\",\"value\":{ \
+            \"rel\":\"System.LinkTypes.Hierarchy-Reverse\", \
+            \"url\":\"https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workItems/$FEATURE_ID\" \
+          }} \
+        ]" \
+        "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/\$Story?api-version=7.0")
+
+      US_ID=$(echo "$US_JSON" | jq -r '.id')
+      if [ "$US_ID" = "null" ] || [ -z "$US_ID" ]; then
+        echo "❌ Failed to create User Story: $TITLE"
+        echo "$US_JSON"
+        exit 1
+      fi
+
+      echo "   ➕ Created User Story: $TITLE (ID: $US_ID)"
+    done
+
+    echo "🎯 All work items created successfully."
+  displayName: 'Create Feature and User Stories'
+  env:
+    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
