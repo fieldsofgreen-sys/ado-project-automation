@@ -10,9 +10,10 @@ steps:
     ORG="sovereignhousingassociationvsts"
     PROJECT="Enterprise%20Data%20Warehouse"
 
-    # New parameter to input URL or ID
+    # User input: parent work item URL or ID
     PARENT_INPUT="https://dev.azure.com/sovereignhousingassociationvsts/Enterprise%20Data%20Warehouse/_workitems/edit/108342"
-    # PARENT_INPUT="108342"   # alternatively just the ID
+    # Or just use the ID:
+    # PARENT_INPUT="108342"
 
     FEATURE_TITLE="New Project Name"
     FEATURE_DESC="As per ADO template"
@@ -30,7 +31,7 @@ steps:
       "Sign off|Completion of testing and final sign off"
     )
 
-    # Extract work item ID from input (either URL or plain ID)
+    # Extract work item ID from input (URL or plain ID)
     if [[ "$PARENT_INPUT" =~ ([0-9]+)$ ]]; then
       EPIC_ID="${BASH_REMATCH[1]}"
     else
@@ -40,9 +41,9 @@ steps:
 
     echo "Using parent work item ID: $EPIC_ID"
 
-    # Fetch Area Path dynamically from the parent work item
+    # Fetch Area Path dynamically from parent work item
     AREA_PATH=$(curl -sS -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
-      "https://dev.azure.com/$ORG/Enterprise%20Data%20Warehouse/_apis/wit/workitems/$EPIC_ID?api-version=7.0" | jq -r '.fields["System.AreaPath"]')
+      "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$EPIC_ID?api-version=7.0" | jq -r '.fields["System.AreaPath"]')
 
     if [[ -z "$AREA_PATH" || "$AREA_PATH" == "null" ]]; then
       echo "❌ Failed to get Area Path for work item $EPIC_ID"
@@ -51,9 +52,39 @@ steps:
 
     echo "Parent Area Path: $AREA_PATH"
 
+    # Helper function to perform authenticated curl with retries
+    function az_curl() {
+      local method=$1
+      local url=$2
+      local data=${3:-}
+
+      local tries=0
+      local max_tries=3
+      local response
+
+      until [[ $tries -ge $max_tries ]]
+      do
+        if [[ -z "$data" ]]; then
+          response=$(curl -sS -X "$method" -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" "$url") && break
+        else
+          response=$(curl -sS -X "$method" -H "Content-Type: application/json-patch+json" -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" --data "$data" "$url") && break
+        fi
+        ((tries++))
+        echo "⚠️ Retry #$tries for $method $url"
+        sleep 2
+      done
+
+      if [[ $tries -ge $max_tries ]]; then
+        echo "❌ Failed $method $url after $max_tries attempts."
+        exit 1
+      fi
+
+      echo "$response"
+    }
+
     echo "Creating Feature: $FEATURE_TITLE"
 
-    FEATURE_JSON=$(jq -n --arg title "$FEATURE_TITLE" --arg desc "$FEATURE_DESC" --arg area "$AREA_PATH" --arg epic_url "https://dev.azure.com/$ORG/Enterprise%20Data%20Warehouse/_apis/wit/workitems/$EPIC_ID" '[ 
+    FEATURE_JSON=$(jq -n --arg title "$FEATURE_TITLE" --arg desc "$FEATURE_DESC" --arg area "$AREA_PATH" --arg epic_url "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$EPIC_ID" '[
       {"op":"add","path":"/fields/System.Title","value":$title},
       {"op":"add","path":"/fields/System.Description","value":$desc},
       {"op":"add","path":"/fields/System.AreaPath","value":$area},
@@ -63,13 +94,9 @@ steps:
       }}
     ]')
 
-    FEATURE_CREATE_URL="https://dev.azure.com/$ORG/Enterprise%20Data%20Warehouse/_apis/wit/workitems/\$Feature?api-version=7.0"
+    FEATURE_CREATE_URL="https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/\$Feature?api-version=7.0"
 
-    RESPONSE=$(curl -sS -X POST \
-      -H "Content-Type: application/json-patch+json" \
-      -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
-      --data "$FEATURE_JSON" \
-      "$FEATURE_CREATE_URL")
+    RESPONSE=$(az_curl POST "$FEATURE_CREATE_URL" "$FEATURE_JSON")
 
     FEATURE_ID=$(echo "$RESPONSE" | jq -r '.id')
 
@@ -81,8 +108,14 @@ steps:
 
     echo "✅ Feature created with ID: $FEATURE_ID"
 
-    # The rest remains unchanged, using $AREA_PATH and $FEATURE_ID
-    # ...
-  displayName: 'Create Feature and Ordered User Stories'
-  env:
-    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+    echo "Creating User Stories with StackRank to maintain order..."
+
+    STACKRANK_BASE=1000
+    INDEX=0
+
+    for story in "${USER_STORIES[@]}"; do
+      TITLE="${story%%|*}"
+      DESC="${story#*|}"
+      STACKRANK=$((STACKRANK_BASE + INDEX * 100))
+
+      US_JSON=$(jq -n --arg title "$TITLE" --arg desc "$DESC" --arg area "$AREA_PATH" --arg feature_url "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$FEATURE_ID" -_
