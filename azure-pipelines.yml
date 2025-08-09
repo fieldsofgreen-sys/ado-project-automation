@@ -5,14 +5,11 @@ pool:
 
 steps:
 - script: |
-    # ========================
-    # CONFIGURATION
-    # ========================
     ORG="sovereignhousingassociationvsts"
     PROJECT="Enterprise%20Data%20Warehouse"
     AREA_PATH="Enterprise Data Warehouse\\Data and Analytics"
 
-    EPIC_ID="108342"  # GIS Test epic ID
+    EPIC_ID="108342"
 
     FEATURE_TITLE="New Project Name"
     FEATURE_DESC="As per ADO template"
@@ -30,69 +27,60 @@ steps:
       "Story 10 Sign off|Completion of testing and final sign off"
     )
 
-    # ========================
-    # CREATE FEATURE (child of Epic)
-    # ========================
     echo "Creating Feature: $FEATURE_TITLE"
 
-    FEATURE_JSON=$(curl -s \
-      -X POST \
+    FEATURE_JSON=$(jq -n --arg title "$FEATURE_TITLE" --arg desc "$FEATURE_DESC" --arg area "$AREA_PATH" --arg epic_url "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$EPIC_ID" '[
+      {"op":"add","path":"/fields/System.Title","value":$title},
+      {"op":"add","path":"/fields/System.Description","value":$desc},
+      {"op":"add","path":"/fields/System.AreaPath","value":$area},
+      {"op":"add","path":"/relations/-","value":{
+        "rel":"System.LinkTypes.Hierarchy-Reverse",
+        "url": $epic_url
+      }}
+    ]')
+
+    RESPONSE=$(curl -s -X POST \
       -H "Content-Type: application/json-patch+json" \
       -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
-      --data @- \
-      "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/\$Feature?api-version=7.0" <<EOF
-[
-  {"op":"add","path":"/fields/System.Title","value":"$FEATURE_TITLE"},
-  {"op":"add","path":"/fields/System.Description","value":"$FEATURE_DESC"},
-  {"op":"add","path":"/fields/System.AreaPath","value":"$AREA_PATH"},
-  {"op":"add","path":"/relations/-","value":{
-    "rel":"System.LinkTypes.Hierarchy-Reverse",
-    "url":"https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$EPIC_ID"
-  }}
-]
-EOF
-    )
+      --data "$FEATURE_JSON" \
+      "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/\$Feature?api-version=7.0")
 
-    FEATURE_ID=$(echo "$FEATURE_JSON" | jq -r '.id')
+    FEATURE_ID=$(echo "$RESPONSE" | jq -r '.id')
 
     if [ "$FEATURE_ID" = "null" ] || [ -z "$FEATURE_ID" ]; then
       echo "❌ Failed to create Feature."
-      echo "$FEATURE_JSON"
+      echo "$RESPONSE"
       exit 1
     fi
 
     echo "✅ Feature created with ID: $FEATURE_ID"
 
-    # ========================
-    # CREATE USER STORIES
-    # ========================
     echo "Creating User Stories..."
     for story in "${USER_STORIES[@]}"; do
       TITLE="${story%%|*}"
       DESC="${story#*|}"
 
-      US_JSON=$(curl -s \
-        -X POST \
+      US_JSON=$(jq -n --arg title "$TITLE" --arg desc "$DESC" --arg area "$AREA_PATH" --arg feature_url "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$FEATURE_ID" '[
+        {"op":"add","path":"/fields/System.Title","value":$title},
+        {"op":"add","path":"/fields/System.Description","value":$desc},
+        {"op":"add","path":"/fields/System.AreaPath","value":$area},
+        {"op":"add","path":"/relations/-","value":{
+          "rel":"System.LinkTypes.Hierarchy-Reverse",
+          "url": $feature_url
+        }}
+      ]')
+
+      RESPONSE=$(curl -s -X POST \
         -H "Content-Type: application/json-patch+json" \
         -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
-        --data @- \
-        "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/\$User%20Story?api-version=7.0" <<EOF
-[
-  {"op":"add","path":"/fields/System.Title","value":"$TITLE"},
-  {"op":"add","path":"/fields/System.Description","value":"$DESC"},
-  {"op":"add","path":"/fields/System.AreaPath","value":"$AREA_PATH"},
-  {"op":"add","path":"/relations/-","value":{
-    "rel":"System.LinkTypes.Hierarchy-Reverse",
-    "url":"https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$FEATURE_ID"
-  }}
-]
-EOF
-      )
+        --data "$US_JSON" \
+        "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/\$User%20Story?api-version=7.0")
 
-      US_ID=$(echo "$US_JSON" | jq -r '.id')
+      US_ID=$(echo "$RESPONSE" | jq -r '.id')
+
       if [ "$US_ID" = "null" ] || [ -z "$US_ID" ]; then
         echo "❌ Failed to create User Story: $TITLE"
-        echo "$US_JSON"
+        echo "$RESPONSE"
         exit 1
       fi
 
