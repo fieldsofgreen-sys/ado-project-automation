@@ -5,12 +5,6 @@ pool:
 
 steps:
 - script: |
-    echo "Installing jq..."
-    sudo apt-get update
-    sudo apt-get install -y jq
-  displayName: 'Install jq'
-
-- script: |
     # ========================
     # CONFIGURATION
     # ========================
@@ -38,7 +32,12 @@ steps:
 
     echo "Creating Feature: $FEATURE_TITLE"
 
-    read -r -d '' FEATURE_PATCH << EOM
+    FEATURE_JSON=$(curl -s \
+      -X POST \
+      -H "Content-Type: application/json-patch+json" \
+      -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
+      --data @- \
+      "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/\$Feature?api-version=7.0" <<EOF
 [
   {"op":"add","path":"/fields/System.Title","value":"$FEATURE_TITLE"},
   {"op":"add","path":"/fields/System.Description","value":"$FEATURE_DESC"},
@@ -48,17 +47,12 @@ steps:
     "url":"https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$EPIC_ID"
   }}
 ]
-EOM
-
-    FEATURE_JSON=$(curl -s -X PATCH \
-      -H "Content-Type: application/json-patch+json" \
-      -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
-      --data "$FEATURE_PATCH" \
-      "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/\$Feature?api-version=7.0")
+EOF
+)
 
     FEATURE_ID=$(echo "$FEATURE_JSON" | jq -r '.id')
 
-    if [ -z "$FEATURE_ID" ] || [ "$FEATURE_ID" = "null" ]; then
+    if [ "$FEATURE_ID" = "null" ] || [ -z "$FEATURE_ID" ]; then
       echo "❌ Failed to create Feature."
       echo "$FEATURE_JSON"
       exit 1
@@ -71,7 +65,12 @@ EOM
       TITLE="${story%%|*}"
       DESC="${story#*|}"
 
-      read -r -d '' STORY_PATCH << EOM
+      US_JSON=$(curl -s \
+        -X POST \
+        -H "Content-Type: application/json-patch+json" \
+        -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
+        --data @- \
+        "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/\$Story?api-version=7.0" <<EOF
 [
   {"op":"add","path":"/fields/System.Title","value":"$TITLE"},
   {"op":"add","path":"/fields/System.Description","value":"$DESC"},
@@ -81,16 +80,11 @@ EOM
     "url":"https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$FEATURE_ID"
   }}
 ]
-EOM
-
-      US_JSON=$(curl -s -X PATCH \
-        -H "Content-Type: application/json-patch+json" \
-        -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
-        --data "$STORY_PATCH" \
-        "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/\$User%20Story?api-version=7.0")
+EOF
+)
 
       US_ID=$(echo "$US_JSON" | jq -r '.id')
-      if [ -z "$US_ID" ] || [ "$US_ID" = "null" ]; then
+      if [ "$US_ID" = "null" ] || [ -z "$US_ID" ]; then
         echo "❌ Failed to create User Story: $TITLE"
         echo "$US_JSON"
         exit 1
