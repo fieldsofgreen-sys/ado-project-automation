@@ -29,7 +29,7 @@ steps:
 
     echo "Creating Feature: $FEATURE_TITLE"
 
-    FEATURE_JSON=$(jq -n --arg title "$FEATURE_TITLE" --arg desc "$FEATURE_DESC" --arg area "$AREA_PATH" --arg epic_url "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$EPIC_ID" '[
+    FEATURE_JSON=$(jq -n --arg title "$FEATURE_TITLE" --arg desc "$FEATURE_DESC" --arg area "$AREA_PATH" --arg epic_url "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$EPIC_ID" '[ 
       {"op":"add","path":"/fields/System.Title","value":$title},
       {"op":"add","path":"/fields/System.Description","value":$desc},
       {"op":"add","path":"/fields/System.AreaPath","value":$area},
@@ -56,14 +56,17 @@ steps:
     echo "✅ Feature created with ID: $FEATURE_ID"
 
     echo "Creating User Stories..."
+    STACK_RANK=1000
+
     for story in "${USER_STORIES[@]}"; do
       TITLE="${story%%|*}"
       DESC="${story#*|}"
 
-      US_JSON=$(jq -n --arg title "$TITLE" --arg desc "$DESC" --arg area "$AREA_PATH" --arg feature_url "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$FEATURE_ID" '[
+      US_JSON=$(jq -n --arg title "$TITLE" --arg desc "$DESC" --arg area "$AREA_PATH" --arg feature_url "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$FEATURE_ID" --argjson rank "$STACK_RANK" '[ 
         {"op":"add","path":"/fields/System.Title","value":$title},
         {"op":"add","path":"/fields/System.Description","value":$desc},
         {"op":"add","path":"/fields/System.AreaPath","value":$area},
+        {"op":"add","path":"/fields/Microsoft.VSTS.Common.StackRank","value":$rank},
         {"op":"add","path":"/relations/-","value":{
           "rel":"System.LinkTypes.Hierarchy-Reverse",
           "url": $feature_url
@@ -84,11 +87,12 @@ steps:
         exit 1
       fi
 
-      echo "   ➕ Created User Story: $TITLE (ID: $US_ID)"
+      echo "   ➕ Created User Story: $TITLE (ID: $US_ID) with StackRank $STACK_RANK"
+
+      STACK_RANK=$((STACK_RANK + 100))
     done
 
     echo "🎯 All work items created successfully."
   displayName: 'Create Feature and User Stories'
   env:
     SYSTEM_ACCESSTOKEN: $(System.AccessToken)
-
