@@ -5,6 +5,8 @@ pool:
 
 steps:
 - script: |
+    set -euo pipefail
+
     ORG="sovereignhousingassociationvsts"
     PROJECT="Enterprise%20Data%20Warehouse"
     AREA_PATH="Enterprise Data Warehouse\\Data and Analytics"
@@ -29,7 +31,7 @@ steps:
 
     echo "Creating Feature: $FEATURE_TITLE"
 
-    FEATURE_JSON=$(jq -n --arg title "$FEATURE_TITLE" --arg desc "$FEATURE_DESC" --arg area "$AREA_PATH" --arg epic_url "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$EPIC_ID" '[ 
+    FEATURE_JSON=$(jq -n --arg title "$FEATURE_TITLE" --arg desc "$FEATURE_DESC" --arg area "$AREA_PATH" --arg epic_url "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$EPIC_ID" '[
       {"op":"add","path":"/fields/System.Title","value":$title},
       {"op":"add","path":"/fields/System.Description","value":$desc},
       {"op":"add","path":"/fields/System.AreaPath","value":$area},
@@ -55,18 +57,21 @@ steps:
 
     echo "✅ Feature created with ID: $FEATURE_ID"
 
-    echo "Creating User Stories..."
-    STACK_RANK=1000
+    echo "Creating User Stories with StackRank to maintain order..."
+
+    STACKRANK_BASE=1000
+    INDEX=0
 
     for story in "${USER_STORIES[@]}"; do
       TITLE="${story%%|*}"
       DESC="${story#*|}"
+      STACKRANK=$(($STACKRANK_BASE + $INDEX * 100))
 
-      US_JSON=$(jq -n --arg title "$TITLE" --arg desc "$DESC" --arg area "$AREA_PATH" --arg feature_url "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$FEATURE_ID" --argjson rank "$STACK_RANK" '[ 
+      US_JSON=$(jq -n --arg title "$TITLE" --arg desc "$DESC" --arg area "$AREA_PATH" --arg feature_url "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$FEATURE_ID" --argjson stackrank "$STACKRANK" '[
         {"op":"add","path":"/fields/System.Title","value":$title},
         {"op":"add","path":"/fields/System.Description","value":$desc},
         {"op":"add","path":"/fields/System.AreaPath","value":$area},
-        {"op":"add","path":"/fields/Microsoft.VSTS.Common.StackRank","value":$rank},
+        {"op":"add","path":"/fields/Microsoft.VSTS.Common.StackRank","value":$stackrank},
         {"op":"add","path":"/relations/-","value":{
           "rel":"System.LinkTypes.Hierarchy-Reverse",
           "url": $feature_url
@@ -87,12 +92,41 @@ steps:
         exit 1
       fi
 
-      echo "   ➕ Created User Story: $TITLE (ID: $US_ID) with StackRank $STACK_RANK"
+      echo "   ➕ Created User Story: $TITLE (ID: $US_ID) with StackRank: $STACKRANK"
 
-      STACK_RANK=$((STACK_RANK + 100))
+      INDEX=$((INDEX + 1))
     done
 
-    echo "🎯 All work items created successfully."
-  displayName: 'Create Feature and User Stories'
+    echo
+    echo "Verifying StackRank on created User Stories..."
+
+    for story in "${USER_STORIES[@]}"; do
+      TITLE="${story%%|*}"
+
+      # WIQL query to find work items by title & area path
+      WIQL_QUERY=$(jq -n --arg title "$TITLE" --arg area "$AREA_PATH" '{query: "Select [System.Id], [System.Title], [Microsoft.VSTS.Common.StackRank] From WorkItems Where [System.Title] = \"\($title)\" And [System.AreaPath] = \"\($area)\""}')
+
+      SEARCH_URL="https://dev.azure.com/$ORG/$PROJECT/_apis/wit/wiql?api-version=7.0"
+
+      RESULT=$(curl -s -X POST \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
+        --data "$WIQL_QUERY" \
+        "$SEARCH_URL")
+
+      ITEM_IDS=$(echo "$RESULT" | jq -r '.workItems[].id')
+
+      for ID in $ITEM_IDS; do
+        ITEM_DETAIL=$(curl -s -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$ID?fields=System.Title,Microsoft.VSTS.Common.StackRank&api-version=7.0")
+        TITLE_FIELD=$(echo "$ITEM_DETAIL" | jq -r '.fields["System.Title"]')
+        RANK_FIELD=$(echo "$ITEM_DETAIL" | jq -r '.fields["Microsoft.VSTS.Common.StackRank"]')
+        echo "User Story '$TITLE_FIELD' has StackRank: $RANK_FIELD"
+      done
+    done
+
+    echo
+    echo "🎯 All work items created and verified successfully."
+
+  displayName: 'Create Feature and Ordered User Stories'
   env:
     SYSTEM_ACCESSTOKEN: $(System.AccessToken)
