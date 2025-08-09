@@ -1,8 +1,5 @@
 trigger: none
 
-pool:
-  vmImage: ubuntu-latest
-
 parameters:
   - name: featureTitle
     type: string
@@ -13,12 +10,16 @@ parameters:
     displayName: 'Parent Work Item URL or ID (optional)'
     default: ''
 
+pool:
+  vmImage: ubuntu-latest
+
 steps:
 - script: |
     set -euo pipefail
 
     ORG="sovereignhousingassociationvsts"
     PROJECT="Enterprise Data Warehouse"
+    PROJECT_URL_ENCODED="Enterprise%20Data%20Warehouse"
 
     FEATURE_TITLE="${{ parameters.featureTitle }}"
     if [[ -z "$FEATURE_TITLE" ]]; then
@@ -28,13 +29,11 @@ steps:
 
     PARENT_INPUT="${{ parameters.parentInput }}"
 
-    # Function to extract work item ID from URL or use ID directly
     function extract_id() {
       local input="$1"
       if [[ "$input" =~ ^[0-9]+$ ]]; then
         echo "$input"
       else
-        # Try to extract the last number segment from URL, common work item URL format
         local id=$(echo "$input" | grep -oE '[0-9]+' | tail -1)
         echo "$id"
       fi
@@ -51,19 +50,22 @@ steps:
         exit 1
       fi
 
-      # Get work item details to fetch Area Path
-      WORK_ITEM_URL="https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$EPIC_ID?api-version=7.0"
+      # Fetch work item details to get Area Path
+      WORK_ITEM_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$EPIC_ID?api-version=7.0"
+      echo "Fetching work item details from: $WORK_ITEM_URL"
+
       RESPONSE=$(curl -sS -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" "$WORK_ITEM_URL")
 
       AREA_PATH=$(echo "$RESPONSE" | jq -r '.fields["System.AreaPath"] // empty')
 
       if [[ -z "$AREA_PATH" || "$AREA_PATH" == "null" ]]; then
         echo "❌ Could not retrieve Area Path for work item ID $EPIC_ID"
+        echo "Response was: $RESPONSE"
         exit 1
       fi
-    fi
 
-    FEATURE_DESC="As per ADO template"
+      echo "Using Area Path: $AREA_PATH"
+    fi
 
     USER_STORIES=(
       "Discovery|Initial background work as needed"
@@ -108,10 +110,10 @@ steps:
     }
 
     echo "Creating Feature: $FEATURE_TITLE"
-    echo "Using Parent Work Item ID: $EPIC_ID"
-    echo "Using Area Path: $AREA_PATH"
 
-    FEATURE_JSON=$(jq -n --arg title "$FEATURE_TITLE" --arg desc "$FEATURE_DESC" --arg area "$AREA_PATH" --arg epic_url "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$EPIC_ID" '[
+    EPIC_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$EPIC_ID"
+
+    FEATURE_JSON=$(jq -n --arg title "$FEATURE_TITLE" --arg desc "As per ADO template" --arg area "$AREA_PATH" --arg epic_url "$EPIC_URL" '[
       {"op":"add","path":"/fields/System.Title","value":$title},
       {"op":"add","path":"/fields/System.Description","value":$desc},
       {"op":"add","path":"/fields/System.AreaPath","value":$area},
@@ -121,7 +123,7 @@ steps:
       }}
     ]')
 
-    FEATURE_CREATE_URL="https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/\$Feature?api-version=7.0"
+    FEATURE_CREATE_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/\$Feature?api-version=7.0"
 
     RESPONSE=$(az_curl POST "$FEATURE_CREATE_URL" "$FEATURE_JSON")
 
@@ -145,7 +147,9 @@ steps:
       DESC="${story#*|}"
       STACKRANK=$((STACKRANK_BASE + INDEX * 100))
 
-      US_JSON=$(jq -n --arg title "$TITLE" --arg desc "$DESC" --arg area "$AREA_PATH" --arg feature_url "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$FEATURE_ID" --argjson stackrank "$STACKRANK" '[
+      FEATURE_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$FEATURE_ID"
+
+      US_JSON=$(jq -n --arg title "$TITLE" --arg desc "$DESC" --arg area "$AREA_PATH" --arg feature_url "$FEATURE_URL" --argjson stackrank "$STACKRANK" '[
         {"op":"add","path":"/fields/System.Title","value":$title},
         {"op":"add","path":"/fields/System.Description","value":$desc},
         {"op":"add","path":"/fields/System.AreaPath","value":$area},
@@ -156,7 +160,7 @@ steps:
         }}
       ]')
 
-      US_CREATE_URL="https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/\$User%20Story?api-version=7.0"
+      US_CREATE_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/\$User%20Story?api-version=7.0"
 
       RESPONSE=$(az_curl POST "$US_CREATE_URL" "$US_JSON")
 
@@ -171,7 +175,7 @@ steps:
       echo "   ➕ Created User Story: $TITLE (ID: $US_ID) with StackRank: $STACKRANK"
 
       INDEX=$((INDEX + 1))
-      sleep 1
+      sleep 1  # brief pause to reduce API load
     done
 
     echo
@@ -182,7 +186,7 @@ steps:
 
       WIQL_QUERY=$(jq -n --arg title "$TITLE" --arg area "$AREA_PATH" '{query: "Select [System.Id], [System.Title], [Microsoft.VSTS.Common.StackRank] From WorkItems Where [System.Title] = \"\($title)\" And [System.AreaPath] = \"\($area)\""}')
 
-      SEARCH_URL="https://dev.azure.com/$ORG/$PROJECT/_apis/wit/wiql?api-version=7.0"
+      SEARCH_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/wiql?api-version=7.0"
 
       RESULT=$(curl -sS -X POST \
         -H "Content-Type: application/json" \
@@ -198,7 +202,7 @@ steps:
       fi
 
       for ID in $ITEM_IDS; do
-        ITEM_DETAIL=$(curl -sS -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$ID?fields=System.Title,Microsoft.VSTS.Common.StackRank&api-version=7.0")
+        ITEM_DETAIL=$(curl -sS -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$ID?fields=System.Title,Microsoft.VSTS.Common.StackRank&api-version=7.0")
         TITLE_FIELD=$(echo "$ITEM_DETAIL" | jq -r '.fields["System.Title"]')
         RANK_FIELD=$(echo "$ITEM_DETAIL" | jq -r '.fields["Microsoft.VSTS.Common.StackRank"]')
         echo "User Story '$TITLE_FIELD' has StackRank: $RANK_FIELD"
@@ -209,4 +213,4 @@ steps:
     echo "🎯 All work items created and verified successfully."
   displayName: 'Create Feature and Ordered User Stories'
   env:
-    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+    SYSTEM_ACCESST
