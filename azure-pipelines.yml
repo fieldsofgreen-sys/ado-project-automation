@@ -1,55 +1,68 @@
-parameters:
-  - name: parentInput
-    type: string
-    default: ''
-    displayName: 'Parent Work Item URL or ID'
-
 trigger: none
 
 pool:
   vmImage: ubuntu-latest
+
+parameters:
+  - name: featureTitle
+    type: string
+    displayName: 'Feature Title'
+    default: ''
+  - name: parentInput
+    type: string
+    displayName: 'Parent Work Item URL or ID (optional)'
+    default: ''
 
 steps:
 - script: |
     set -euo pipefail
 
     ORG="sovereignhousingassociationvsts"
-    PROJECT="Enterprise%20Data%20Warehouse"
+    PROJECT="Enterprise Data Warehouse"
+
+    FEATURE_TITLE="${{ parameters.featureTitle }}"
+    if [[ -z "$FEATURE_TITLE" ]]; then
+      echo "❌ Feature Title must be provided."
+      exit 1
+    fi
 
     PARENT_INPUT="${{ parameters.parentInput }}"
 
+    # Function to extract work item ID from URL or use ID directly
+    function extract_id() {
+      local input="$1"
+      if [[ "$input" =~ ^[0-9]+$ ]]; then
+        echo "$input"
+      else
+        # Try to extract the last number segment from URL, common work item URL format
+        local id=$(echo "$input" | grep -oE '[0-9]+' | tail -1)
+        echo "$id"
+      fi
+    }
+
     if [[ -z "$PARENT_INPUT" ]]; then
-      echo "❌ No Parent Work Item URL or ID provided. Please enter a value."
-      exit 1
-    fi
-
-    # Extract numeric ID if input is URL or ID
-    if [[ "$PARENT_INPUT" =~ ^https?:// ]]; then
-      # Extract work item ID from URL (last numeric segment)
-      EPIC_ID=$(echo "$PARENT_INPUT" | grep -oE '[0-9]+/?$' | grep -oE '[0-9]+')
+      echo "No parent work item specified. Defaulting to Epic ID 108342 and fixed Area Path."
+      EPIC_ID="108342"
+      AREA_PATH="Enterprise Data Warehouse\\Data and Analytics"
     else
-      EPIC_ID="$PARENT_INPUT"
+      EPIC_ID=$(extract_id "$PARENT_INPUT")
+      if [[ -z "$EPIC_ID" ]]; then
+        echo "❌ Could not extract work item ID from input: $PARENT_INPUT"
+        exit 1
+      fi
+
+      # Get work item details to fetch Area Path
+      WORK_ITEM_URL="https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$EPIC_ID?api-version=7.0"
+      RESPONSE=$(curl -sS -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" "$WORK_ITEM_URL")
+
+      AREA_PATH=$(echo "$RESPONSE" | jq -r '.fields["System.AreaPath"] // empty')
+
+      if [[ -z "$AREA_PATH" || "$AREA_PATH" == "null" ]]; then
+        echo "❌ Could not retrieve Area Path for work item ID $EPIC_ID"
+        exit 1
+      fi
     fi
 
-    if ! [[ "$EPIC_ID" =~ ^[0-9]+$ ]]; then
-      echo "❌ Provided Parent Input is not a valid work item ID."
-      exit 1
-    fi
-
-    echo "Using Parent Work Item ID: $EPIC_ID"
-
-    # Get Area Path of parent work item via API
-    AREA_PATH=$(curl -sS -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$EPIC_ID?api-version=7.0" \
-      | jq -r '.fields["System.AreaPath"]')
-
-    if [[ -z "$AREA_PATH" || "$AREA_PATH" == "null" ]]; then
-      echo "❌ Failed to retrieve Area Path for work item ID $EPIC_ID."
-      exit 1
-    fi
-
-    echo "Using Area Path: $AREA_PATH"
-
-    FEATURE_TITLE="New Project Name"
     FEATURE_DESC="As per ADO template"
 
     USER_STORIES=(
@@ -65,7 +78,6 @@ steps:
       "Sign off|Completion of testing and final sign off"
     )
 
-    # Helper function to perform authenticated curl with retries
     function az_curl() {
       local method=$1
       local url=$2
@@ -96,6 +108,8 @@ steps:
     }
 
     echo "Creating Feature: $FEATURE_TITLE"
+    echo "Using Parent Work Item ID: $EPIC_ID"
+    echo "Using Area Path: $AREA_PATH"
 
     FEATURE_JSON=$(jq -n --arg title "$FEATURE_TITLE" --arg desc "$FEATURE_DESC" --arg area "$AREA_PATH" --arg epic_url "https://dev.azure.com/$ORG/$PROJECT/_apis/wit/workitems/$EPIC_ID" '[
       {"op":"add","path":"/fields/System.Title","value":$title},
@@ -157,7 +171,7 @@ steps:
       echo "   ➕ Created User Story: $TITLE (ID: $US_ID) with StackRank: $STACKRANK"
 
       INDEX=$((INDEX + 1))
-      sleep 1  # brief pause to reduce API load
+      sleep 1
     done
 
     echo
@@ -166,7 +180,6 @@ steps:
     for story in "${USER_STORIES[@]}"; do
       TITLE="${story%%|*}"
 
-      # WIQL query to find work items by title & area path
       WIQL_QUERY=$(jq -n --arg title "$TITLE" --arg area "$AREA_PATH" '{query: "Select [System.Id], [System.Title], [Microsoft.VSTS.Common.StackRank] From WorkItems Where [System.Title] = \"\($title)\" And [System.AreaPath] = \"\($area)\""}')
 
       SEARCH_URL="https://dev.azure.com/$ORG/$PROJECT/_apis/wit/wiql?api-version=7.0"
@@ -197,4 +210,3 @@ steps:
   displayName: 'Create Feature and Ordered User Stories'
   env:
     SYSTEM_ACCESSTOKEN: $(System.AccessToken)
-
