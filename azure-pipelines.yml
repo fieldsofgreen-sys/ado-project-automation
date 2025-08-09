@@ -3,7 +3,6 @@ parameters:
     type: string
     default: ''
     displayName: 'Parent Work Item URL or ID'
-    description: 'Enter the Azure DevOps work item URL or work item ID where the feature should be saved'
 
 trigger: none
 
@@ -198,3 +197,4 @@ steps:
   displayName: 'Create Feature and Ordered User Stories'
   env:
     SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
