@@ -1,3 +1,15 @@
+trigger: none
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+- script: |
+    echo "Installing jq..."
+    sudo apt-get update
+    sudo apt-get install -y jq
+  displayName: 'Install jq'
+
 - script: |
     # ========================
     # CONFIGURATION
