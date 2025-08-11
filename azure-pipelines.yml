@@ -66,19 +66,18 @@ steps:
       echo "Using Area Path: $AREA_PATH"
     fi
 
-USER_STORIES=(
-  "01 Discovery|Initial background work as needed"
-  "02 Scoping|Documented in ADO Feature"
-  "03 Report mock-up|Evidenced in PPT or PBI"
-  "04 Sourcing data|XL template complete and request raised with Data Engineers"
-  "05 Data modelling|XL template complete and request raised with Data Engineers"
-  "06 Definitions documented|Word document with sign off from stakeholders. Once agreed, enter into Purview"
-  "07 Data validation|Dev dataset back from Data Engineers for initial data checks. Advise when complete"
-  "08 DAX measure creation|Master dataset back from Data Engineers for DAX measure creation. Any amendments, notify Data Engineers"
-  "09 UAT report build|Build report out from master dataset. Arrange end user testing"
-  "10 Sign off|Completion of testing and final sign off"
-)
-
+    USER_STORIES=(
+      "1 Discovery|Initial background work as needed"
+      "2 Scoping|Documented in ADO Feature"
+      "3 Report mock-up|Evidenced in PPT or PBI"
+      "4 Sourcing data|XL template complete and request raised with Data Engineers"
+      "5 Data modelling|XL template complete and request raised with Data Engineers"
+      "6 Definitions documented|Word document with sign off from stakeholders. Once agreed, enter into Purview"
+      "7 Data validation|Dev dataset back from Data Engineers for initial data checks. Advise when complete"
+      "8 DAX measure creation|Master dataset back from Data Engineers for DAX measure creation. Any amendments, notify Data Engineers"
+      "9 UAT report build|Build report out from master dataset. Arrange end user testing"
+      "10 Sign off|Completion of testing and final sign off"
+    )
 
     function az_curl() {
       local method=$1
@@ -197,4 +196,3 @@ USER_STORIES=(
   displayName: 'Create Feature and Ordered User Stories'
   env:
     SYSTEM_ACCESSTOKEN: $(System.AccessToken)
-
