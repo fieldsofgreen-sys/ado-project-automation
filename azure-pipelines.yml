@@ -50,7 +50,6 @@ steps:
         exit 1
       fi
 
-      # Fetch work item details to get Area Path
       WORK_ITEM_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$EPIC_ID?api-version=7.0"
       echo "Fetching work item details from: $WORK_ITEM_URL"
 
@@ -137,28 +136,27 @@ steps:
 
     echo "✅ Feature created with ID: $FEATURE_ID"
 
-    echo "Creating User Stories with StackRank to maintain order..."
-
+    echo "Creating User Stories without linking, storing IDs in order..."
     STACKRANK_BASE=1000
     INDEX=0
+    CREATED_STORY_IDS=()
 
     for story in "${USER_STORIES[@]}"; do
       TITLE="${story%%|*}"
       DESC="${story#*|}"
       STACKRANK=$((STACKRANK_BASE + INDEX * 100))
 
-      FEATURE_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$FEATURE_ID"
-
-      US_JSON=$(jq -n --arg title "$TITLE" --arg desc "$DESC" --arg area "$AREA_PATH" --arg feature_url "$FEATURE_URL" --argjson stackrank "$STACKRANK" '[
-        {"op":"add","path":"/fields/System.Title","value":$title},
-        {"op":"add","path":"/fields/System.Description","value":$desc},
-        {"op":"add","path":"/fields/System.AreaPath","value":$area},
-        {"op":"add","path":"/fields/Microsoft.VSTS.Common.StackRank","value":$stackrank},
-        {"op":"add","path":"/relations/-","value":{
-          "rel":"System.LinkTypes.Hierarchy-Reverse",
-          "url": $feature_url
-        }}
-      ]')
+      US_JSON=$(jq -n \
+        --arg title "$TITLE" \
+        --arg desc "$DESC" \
+        --arg area "$AREA_PATH" \
+        --argjson stackrank "$STACKRANK" \
+        '[
+          {"op":"add","path":"/fields/System.Title","value":$title},
+          {"op":"add","path":"/fields/System.Description","value":$desc},
+          {"op":"add","path":"/fields/System.AreaPath","value":$area},
+          {"op":"add","path":"/fields/Microsoft.VSTS.Common.StackRank","value":$stackrank}
+        ]')
 
       US_CREATE_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/\$User%20Story?api-version=7.0"
 
@@ -173,46 +171,28 @@ steps:
       fi
 
       echo "   ➕ Created User Story: $TITLE (ID: $US_ID) with StackRank: $STACKRANK"
+      CREATED_STORY_IDS+=("$US_ID")
 
       INDEX=$((INDEX + 1))
-      sleep 1  # brief pause to reduce API load
+      sleep 1
     done
 
-    echo
-    echo "Verifying StackRank on created User Stories..."
+    echo "🔗 Linking all stories to Feature in correct order..."
+    LINKS_JSON="["
 
-    for story in "${USER_STORIES[@]}"; do
-      TITLE="${story%%|*}"
-
-      WIQL_QUERY=$(jq -n --arg title "$TITLE" --arg area "$AREA_PATH" '{query: "Select [System.Id], [System.Title], [Microsoft.VSTS.Common.StackRank] From WorkItems Where [System.Title] = \"\($title)\" And [System.AreaPath] = \"\($area)\""}')
-
-      SEARCH_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/wiql?api-version=7.0"
-
-      RESULT=$(curl -sS -X POST \
-        -H "Content-Type: application/json" \
-        -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
-        --data "$WIQL_QUERY" \
-        "$SEARCH_URL")
-
-      ITEM_IDS=$(echo "$RESULT" | jq -r '.workItems[].id // empty')
-
-      if [[ -z "$ITEM_IDS" ]]; then
-        echo "⚠️ No work items found for User Story: $TITLE"
-        continue
-      fi
-
-      for ID in $ITEM_IDS; do
-        ITEM_DETAIL=$(curl -sS -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$ID?fields=System.Title,Microsoft.VSTS.Common.StackRank&api-version=7.0")
-        TITLE_FIELD=$(echo "$ITEM_DETAIL" | jq -r '.fields["System.Title"]')
-        RANK_FIELD=$(echo "$ITEM_DETAIL" | jq -r '.fields["Microsoft.VSTS.Common.StackRank"]')
-        echo "User Story '$TITLE_FIELD' has StackRank: $RANK_FIELD"
-      done
+    for id in "${CREATED_STORY_IDS[@]}"; do
+      STORY_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$id"
+      LINKS_JSON+=$(jq -n --arg url "$STORY_URL" '{op:"add", path:"/relations/-", value:{rel:"System.LinkTypes.Hierarchy-Forward", url:$url}}')
+      LINKS_JSON+=","
     done
 
-    echo
-    echo "🎯 All work items created and verified successfully."
+    LINKS_JSON="${LINKS_JSON%,}]"
+
+    FEATURE_LINK_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$FEATURE_ID?api-version=7.0"
+    az_curl PATCH "$FEATURE_LINK_URL" "$LINKS_JSON"
+
+    echo "✅ All stories linked to Feature in correct order."
+
   displayName: 'Create Feature and Ordered User Stories'
   env:
     SYSTEM_ACCESSTOKEN: $(System.AccessToken)
-
-
