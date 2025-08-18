@@ -112,39 +112,33 @@ steps:
 
     EPIC_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$EPIC_ID"
 
-    FEATURE_DESC="$(cat <<'EOF'
-<b>Background</b><br/>
-Provide a problem statement / summary of business issue to be addressed. E.g. In July 2022, Vision One performed focus group interviews with Sovereign customers, resulting in the identification of 3 areas of support, with 5 segments as follows:<br/>
-High Support - Very vulnerable or Stressed and Stretched<br/>
-Medium Support - Stable striving or Stable static<br/>
-Low Support - Inherently independent<br/><br/>
-
-<b>Objective</b><br/>
-State what the business goal is of this project. E.g. Sovereign are working with Vision One to define customer segments and personas, with a view to assisting customer facing teams to shape their services based on customer need.<br/><br/>
-
-<b>Benefit</b><br/>
-Provide a list of the business benefits this project will provide. NOTE: these will be used to measure the success of the project. E.g. Initially the results will help identify customers applicable for assistance via the Customer Support Fund.<br/><br/>
-
-<b>In scope</b><br/>
-Provide an overview of the work the project will include. E.g. As a first pass at using internal data to help identify customers in these groups, we're focussing on Income data, to include the following:<br/>
-<ul>
-<li>Current balance data and arrears history (12-18 months), reviewing method of payment - direct vs indirect payers</li>
-<li>Benefit claimants, identified as claiming UC (check HB numbers)</li>
-<li>Vulnerability flags to identify higher support needs, in any household member, identifying if these are with children</li>
-<li>Data from CRM to identify those already in receipt of tenancy /income support</li>
-<li>Fuel voucher provision (not centrally held today)</li>
-<li>Initial customer data from CoRE - Howard to confirm areas of interest</li>
-</ul>
-It's suggested high support customers are likely to be on an annual income of £20K or less and mainly claiming benefits.
-EOF
-)"
+    FEATURE_DESC="<b>Background</b><br/>\n\
+Provide a problem statement / summary of business issue to be addressed. E.g. In July 2022, Vision One performed focus group interviews with Sovereign customers, resulting in the identification of 3 areas of support, with 5 segments as follows:<br/>\n\
+High Support - Very vulnerable or Stressed and Stretched<br/>\n\
+Medium Support - Stable striving or Stable static<br/>\n\
+Low Support - Inherently independent<br/><br/>\n\n\
+<b>Objective</b><br/>\n\
+State what the business goal is of this project. E.g. Sovereign are working with Vision One to define customer segments and personas, with a view to assisting customer facing teams to shape their services based on customer need.<br/><br/>\n\n\
+<b>Benefit</b><br/>\n\
+Provide a list of the business benefits this project will provide. NOTE: these will be used to measure the success of the project. E.g. Initially the results will help identify customers applicable for assistance via the Customer Support Fund.<br/><br/>\n\n\
+<b>In scope</b><br/>\n\
+Provide an overview of the work the project will include. E.g. As a first pass at using internal data to help identify customers in these groups, we're focussing on Income data, to include the following:<br/>\n\
+<ul>\n\
+<li>Current balance data and arrears history (12-18 months), reviewing method of payment - direct vs indirect payers</li>\n\
+<li>Benefit claimants, identified as claiming UC (check HB numbers)</li>\n\
+<li>Vulnerability flags to identify higher support needs, in any household member, identifying if these are with children</li>\n\
+<li>Data from CRM to identify those already in receipt of tenancy /income support</li>\n\
+<li>Fuel voucher provision (not centrally held today)</li>\n\
+<li>Initial customer data from CoRE - Howard to confirm areas of interest</li>\n\
+</ul>\n\
+It's suggested high support customers are likely to be on an annual income of £20K or less and mainly claiming benefits."
 
     FEATURE_JSON=$(jq -n \
       --arg title "$FEATURE_TITLE" \
       --arg area "$AREA_PATH" \
       --arg epic_url "$EPIC_URL" \
       --arg desc "$FEATURE_DESC" \
-      '[ 
+      '[
         {"op":"add","path":"/fields/System.Title","value":$title},
         {"op":"add","path":"/fields/System.Description","value":$desc},
         {"op":"add","path":"/fields/System.AreaPath","value":$area},
@@ -203,4 +197,28 @@ EOF
       fi
 
       echo "   ➕ Created User Story: $TITLE (ID: $US_ID) with StackRank: $STACKRANK"
-      CREATED_STORY_IDS+=("$US_ID_
+      CREATED_STORY_IDS+=("$US_ID")
+
+      INDEX=$((INDEX + 1))
+      sleep 1
+    done
+
+    echo "🔗 Linking all stories to Feature in correct order..."
+    LINKS_JSON="["
+
+    for id in "${CREATED_STORY_IDS[@]}"; do
+      STORY_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$id"
+      LINKS_JSON+=$(jq -n --arg url "$STORY_URL" '{op:"add", path:"/relations/-", value:{rel:"System.LinkTypes.Hierarchy-Forward", url:$url}}')
+      LINKS_JSON+=","
+    done
+
+    LINKS_JSON="${LINKS_JSON%,}]"
+
+    FEATURE_LINK_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$FEATURE_ID?api-version=7.0"
+    az_curl PATCH "$FEATURE_LINK_URL" "$LINKS_JSON"
+
+    echo "✅ All stories linked to Feature in correct order."
+
+  displayName: 'Create Feature and Ordered User Stories'
+  env:
+    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
