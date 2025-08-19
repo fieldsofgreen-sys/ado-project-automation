@@ -112,22 +112,21 @@ steps:
 
     EPIC_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$EPIC_ID"
 
-FEATURE_DESC="**Background**  
+    FEATURE_JSON=$(jq -n --arg title "$FEATURE_TITLE" --arg desc "**Background**
 Provide a problem statement / summary of business issue to be addressed. E.g. In July 2022, Vision One performed focus group interviews with Sovereign customers, resulting in the identification of 3 areas of support, with 5 segments as follows:
 
 - High Support - Very vulnerable or Stressed and Stretched
 - Medium Support - Stable striving or Stable static
 - Low Support - Inherently independent
 
-**Objective**  
+**Objective**
 State what the business goal is of this project. E.g. Sovereign are working with Vision One to define customer segments and personas, with a view to assisting customer facing teams to shape their services based on customer need.
 
-**Benefit**  
+**Benefit**
 Provide a list of the business benefits this project will provide. NOTE: these will be used to measure the success of the project. E.g. Initially the results will help identify customers applicable for assistance via the Customer Support Fund.
 
-**In scope**  
+**In scope**
 Provide an overview of the work the project will include. E.g. As a first pass at using internal data to help identify customers in these groups, we're focussing on Income data, to include the following:
-
 - Current balance data and arrears history (12-18 months), reviewing method of payment - direct vs indirect payers
 - Benefit claimants, identified as claiming UC (check HB numbers)
 - Vulnerability flags to identify higher support needs, in any household member, identifying if these are with children
@@ -135,23 +134,16 @@ Provide an overview of the work the project will include. E.g. As a first pass a
 - Fuel voucher provision (not centrally held today)
 - Initial customer data from CoRE - Howard to confirm areas of interest
 
-It's suggested high support customers are likely to be on an annual income of £20K or less and mainly claiming benefits."
-
-FEATURE_JSON=$(jq -n \
-  --arg title "$FEATURE_TITLE" \
-  --arg desc "$FEATURE_DESC" \
-  --arg area "$AREA_PATH" \
-  --arg epic_url "$EPIC_URL" \
-  '[
-      {"op":"add","path":"/fields/System.Title","value":$title},
-      {"op":"add","path":"/fields/System.Description","value":$desc},
-      {"op":"add","path":"/fields/System.AreaPath","value":$area},
-      {"op":"add","path":"/relations/-","value":{
-        "rel":"System.LinkTypes.Hierarchy-Reverse",
-        "url": $epic_url
-      }}
-    ]')
-
+It's suggested high support customers are likely to be on an annual income of £20K or less and mainly claiming benefits." \
+--arg area "$AREA_PATH" --arg epic_url "$EPIC_URL" '[ 
+  {"op":"add","path":"/fields/System.Title","value":$title},
+  {"op":"add","path":"/fields/System.Description","value":$desc},
+  {"op":"add","path":"/fields/System.AreaPath","value":$area},
+  {"op":"add","path":"/relations/-","value":{
+    "rel":"System.LinkTypes.Hierarchy-Reverse",
+    "url": $epic_url
+  }}
+]')
 
     FEATURE_CREATE_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/\$Feature?api-version=7.0"
 
@@ -182,7 +174,7 @@ FEATURE_JSON=$(jq -n \
         --arg desc "$DESC" \
         --arg area "$AREA_PATH" \
         --argjson stackrank "$STACKRANK" \
-        '[
+        '[ 
           {"op":"add","path":"/fields/System.Title","value":$title},
           {"op":"add","path":"/fields/System.Description","value":$desc},
           {"op":"add","path":"/fields/System.AreaPath","value":$area},
