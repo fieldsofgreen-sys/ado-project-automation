@@ -13,6 +13,32 @@ parameters:
 pool:
   vmImage: ubuntu-latest
 
+variables:
+  FEATURE_DESC: |
+    **Background**
+    Provide a problem statement / summary of business issue to be addressed. E.g. In July 2022, Vision One performed focus group interviews with Sovereign customers, resulting in the identification of 3 areas of support, with 5 segments as follows:
+
+    - High Support - Very vulnerable or Stressed and Stretched
+    - Medium Support - Stable striving or Stable static
+    - Low Support - Inherently independent
+
+    **Objective**
+    State what the business goal is of this project. E.g. Sovereign are working with Vision One to define customer segments and personas, with a view to assisting customer facing teams to shape their services based on customer need.
+
+    **Benefit**
+    Provide a list of the business benefits this project will provide. NOTE: these will be used to measure the success of the project. E.g. Initially the results will help identify customers applicable for assistance via the Customer Support Fund.
+
+    **In scope**
+    Provide an overview of the work the project will include. E.g. As a first pass at using internal data to help identify customers in these groups, we're focussing on Income data, to include the following:
+    - Current balance data and arrears history (12-18 months), reviewing method of payment - direct vs indirect payers
+    - Benefit claimants, identified as claiming UC (check HB numbers)
+    - Vulnerability flags to identify higher support needs, in any household member, identifying if these are with children
+    - Data from CRM to identify those already in receipt of tenancy /income support 
+    - Fuel voucher provision (not centrally held today)
+    - Initial customer data from CoRE - Howard to confirm areas of interest
+
+    It's suggested high support customers are likely to be on an annual income of £20K or less and mainly claiming benefits.
+
 steps:
 - script: |
     set -euo pipefail
@@ -34,7 +60,8 @@ steps:
       if [[ "$input" =~ ^[0-9]+$ ]]; then
         echo "$input"
       else
-        echo "$input" | grep -oE '[0-9]+' | tail -1
+        local id=$(echo "$input" | grep -oE '[0-9]+' | tail -1)
+        echo "$id"
       fi
     }
 
@@ -64,34 +91,6 @@ steps:
       echo "Using Area Path: $AREA_PATH"
     fi
 
-    # Multi-line feature description
-    FEATURE_DESC=$(cat <<'EOF'
-**Background**
-Provide a problem statement / summary of business issue to be addressed. E.g. In July 2022, Vision One performed focus group interviews with Sovereign customers, resulting in the identification of 3 areas of support, with 5 segments as follows:
-
-- High Support - Very vulnerable or Stressed and Stretched
-- Medium Support - Stable striving or Stable static
-- Low Support - Inherently independent
-
-**Objective**
-State what the business goal is of this project. E.g. Sovereign are working with Vision One to define customer segments and personas, with a view to assisting customer facing teams to shape their services based on customer need.
-
-**Benefit**
-Provide a list of the business benefits this project will provide. NOTE: these will be used to measure the success of the project. E.g. Initially the results will help identify customers applicable for assistance via the Customer Support Fund.
-
-**In scope**
-Provide an overview of the work the project will include. E.g. As a first pass at using internal data to help identify customers in these groups, we're focussing on Income data, to include the following:
-- Current balance data and arrears history (12-18 months), reviewing method of payment - direct vs indirect payers
-- Benefit claimants, identified as claiming UC (check HB numbers)
-- Vulnerability flags to identify higher support needs, in any household member, identifying if these are with children
-- Data from CRM to identify those already in receipt of tenancy /income support 
-- Fuel voucher provision (not centrally held today)
-- Initial customer data from CoRE - Howard to confirm areas of interest
-
-It's suggested high support customers are likely to be on an annual income of £20K or less and mainly claiming benefits.
-EOF
-)
-
     USER_STORIES=(
       "01 Discovery|Initial background work as needed"
       "02 Scoping|Documented in ADO Feature"
@@ -109,11 +108,13 @@ EOF
       local method=$1
       local url=$2
       local data=${3:-}
+
       local tries=0
       local max_tries=3
       local response
 
-      until [[ $tries -ge $max_tries ]]; do
+      until [[ $tries -ge $max_tries ]]
+      do
         if [[ -z "$data" ]]; then
           response=$(curl -sS -X "$method" -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" "$url") && break
         else
@@ -135,18 +136,21 @@ EOF
     echo "Creating Feature: $FEATURE_TITLE"
     EPIC_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$EPIC_ID"
 
-    FEATURE_JSON=$(jq -n --arg title "$FEATURE_TITLE" --arg desc "$FEATURE_DESC" --arg area "$AREA_PATH" --arg epic_url "$EPIC_URL" '[ 
+    FEATURE_JSON=$(jq -n --arg title "$FEATURE_TITLE" --arg desc "$FEATURE_DESC" --arg area "$AREA_PATH" --arg epic_url "$EPIC_URL" '[
       {"op":"add","path":"/fields/System.Title","value":$title},
       {"op":"add","path":"/fields/System.Description","value":$desc},
       {"op":"add","path":"/fields/System.AreaPath","value":$area},
-      {"op":"add","path":"/relations/-","value":{ "rel":"System.LinkTypes.Hierarchy-Reverse", "url": $epic_url }}
+      {"op":"add","path":"/relations/-","value":{
+        "rel":"System.LinkTypes.Hierarchy-Reverse",
+        "url": $epic_url
+      }}
     ]')
 
     FEATURE_CREATE_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/\$Feature?api-version=7.0"
     RESPONSE=$(az_curl POST "$FEATURE_CREATE_URL" "$FEATURE_JSON")
     FEATURE_ID=$(echo "$RESPONSE" | jq -r '.id')
 
-    if [[ -z "$FEATURE_ID" || "$FEATURE_ID" == "null" ]]; then
+    if [[ "$FEATURE_ID" == "null" || -z "$FEATURE_ID" ]]; then
       echo "❌ Failed to create Feature."
       echo "$RESPONSE"
       exit 1
@@ -154,7 +158,7 @@ EOF
 
     echo "✅ Feature created with ID: $FEATURE_ID"
 
-    # Create User Stories
+    echo "Creating User Stories without linking, storing IDs in order..."
     STACKRANK_BASE=1000
     INDEX=0
     CREATED_STORY_IDS=()
@@ -164,18 +168,21 @@ EOF
       DESC="${story#*|}"
       STACKRANK=$((STACKRANK_BASE + INDEX * 100))
 
-      US_JSON=$(jq -n --arg title "$TITLE" --arg desc "$DESC" --arg area "$AREA_PATH" --argjson stackrank "$STACKRANK" '[ 
-        {"op":"add","path":"/fields/System.Title","value":$title},
-        {"op":"add","path":"/fields/System.Description","value":$desc},
-        {"op":"add","path":"/fields/System.AreaPath","value":$area},
-        {"op":"add","path":"/fields/Microsoft.VSTS.Common.StackRank","value":$stackrank}
-      ]')
+      US_JSON=$(jq -n \
+        --arg title "$TITLE" \
+        --arg desc "$DESC" \
+        --arg area "$AREA_PATH" \
+        --argjson stackrank "$STACKRANK" \
+        '[{"op":"add","path":"/fields/System.Title","value":$title},
+          {"op":"add","path":"/fields/System.Description","value":$desc},
+          {"op":"add","path":"/fields/System.AreaPath","value":$area},
+          {"op":"add","path":"/fields/Microsoft.VSTS.Common.StackRank","value":$stackrank}]')
 
       US_CREATE_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/\$User%20Story?api-version=7.0"
       RESPONSE=$(az_curl POST "$US_CREATE_URL" "$US_JSON")
       US_ID=$(echo "$RESPONSE" | jq -r '.id')
 
-      if [[ -z "$US_ID" || "$US_ID" == "null" ]]; then
+      if [[ "$US_ID" == "null" || -z "$US_ID" ]]; then
         echo "❌ Failed to create User Story: $TITLE"
         echo "$RESPONSE"
         exit 1
@@ -187,7 +194,6 @@ EOF
       sleep 1
     done
 
-    # Link stories to Feature
     echo "🔗 Linking all stories to Feature in correct order..."
     LINKS_JSON="["
     for id in "${CREATED_STORY_IDS[@]}"; do
@@ -199,6 +205,7 @@ EOF
 
     FEATURE_LINK_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$FEATURE_ID?api-version=7.0"
     az_curl PATCH "$FEATURE_LINK_URL" "$LINKS_JSON"
+
     echo "✅ All stories linked to Feature in correct order."
   displayName: 'Create Feature and Ordered User Stories'
   env:
