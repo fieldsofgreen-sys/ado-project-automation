@@ -69,7 +69,7 @@ steps:
       --arg area "$AREA_PATH" \
       --arg epic_url "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$EPIC_ID" \
       --arg desc "$FEATURE_DESC" \
-      '[
+      '[ 
         {"op":"add","path":"/fields/System.Title","value":$title},
         {"op":"add","path":"/fields/System.Description","value":$desc},
         {"op":"add","path":"/fields/System.AreaPath","value":$area},
@@ -83,7 +83,7 @@ steps:
       -H "Content-Type: application/json-patch+json" \
       -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
       -d "$FEATURE_JSON" \
-      "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/\$Feature?api-version=7.0")
+      "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/Feature?api-version=7.0")
 
     FEATURE_ID=$(echo "$FEATURE_RESPONSE" | jq -r '.id // empty')
 
@@ -121,8 +121,8 @@ steps:
         --arg title "$TITLE" \
         --arg desc "$DESC" \
         --arg area "$AREA_PATH" \
-        --arg stackrank $((1000 + i * 100)) \
-        '[
+        --argjson stackrank $((1000 + i * 100)) \
+        '[ 
           {"op":"add","path":"/fields/System.Title","value":$title},
           {"op":"add","path":"/fields/System.Description","value":$desc},
           {"op":"add","path":"/fields/System.AreaPath","value":$area},
@@ -133,12 +133,13 @@ steps:
         -H "Content-Type: application/json-patch+json" \
         -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
         -d "$STORY_JSON" \
-        "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/\$User%20Story?api-version=7.0")
+        "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/User%20Story?api-version=7.0")
+
+      echo "DEBUG: $STORY_RESPONSE"
 
       STORY_ID=$(echo "$STORY_RESPONSE" | jq -r '.id // empty')
       if [[ -z "$STORY_ID" || "$STORY_ID" == "null" ]]; then
         echo "❌ Failed to create User Story: $TITLE"
-        echo "$STORY_RESPONSE"
         exit 1
       fi
 
@@ -150,7 +151,7 @@ steps:
     for STORY_ID in "${STORY_IDS[@]}"; do
       LINK_JSON=$(jq -n \
         --arg feature_url "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$FEATURE_ID" \
-        '[
+        '[ 
           {"op":"add","path":"/relations/-","value":{"rel":"System.LinkTypes.Hierarchy-Forward","url":$feature_url}}
         ]')
 
