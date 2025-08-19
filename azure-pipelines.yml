@@ -60,8 +60,7 @@ steps:
       fi
     fi
 
-    # JSON-safe Feature description
-    FEATURE_DESC="<b>Background</b><br>Provide a problem statement / summary of business issue to be addressed. E.g. In July 2022, Vision One performed focus group interviews with Sovereign customers, resulting in the identification of 3 areas of support, with 5 segments as follows:<br><ul><li>High Support - Very vulnerable or Stressed and Stretched</li><li>Medium Support - Stable striving or Stable static</li><li>Low Support - Inherently independent</li></ul><br><b>Objective</b><br>State what the business goal is of this project. E.g. Sovereign are working with Vision One to define customer segments and personas, with a view to assisting customer facing teams to shape their services based on customer need.<br><br><b>Benefit</b><br>Provide a list of the business benefits this project will provide. NOTE: these will be used to measure the success of the project. E.g. Initially the results will help identify customers applicable for assistance via the Customer Support Fund.<br><br><b>In scope</b><br>Provide an overview of the work the project will include. E.g. As a first pass at using internal data to help identify customers in these groups, we're focussing on Income data, to include the following:<br><ul><li>Current balance data and arrears history (12-18 months), reviewing method of payment - direct vs indirect payers</li><li>Benefit claimants, identified as claiming UC (check HB numbers)</li><li>Vulnerability flags to identify higher support needs, in any household member, identifying if these are with children</li><li>Data from CRM to identify those already in receipt of tenancy /income support</li><li>Fuel voucher provision (not centrally held today)</li><li>Initial customer data from CoRE - Howard to confirm areas of interest</li></ul><br>It's suggested high support customers are likely to be on an annual income of £20K or less and mainly claiming benefits."
+    FEATURE_DESC="<b>Background</b><br>Provide a problem statement / summary of business issue...<br>"
 
     # Create Feature
     FEATURE_JSON=$(jq -n \
@@ -117,11 +116,12 @@ steps:
       TITLE=$(echo "$STORY" | cut -d'|' -f1)
       DESC=$(echo "$STORY" | cut -d'|' -f2-)
 
+      STACKRANK=$((1000 + i * 100))
       STORY_JSON=$(jq -n \
         --arg title "$TITLE" \
         --arg desc "$DESC" \
         --arg area "$AREA_PATH" \
-        --arg stackrank $((1000 + i * 100)) \
+        --argjson stackrank "$STACKRANK" \
         '[
           {"op":"add","path":"/fields/System.Title","value":$title},
           {"op":"add","path":"/fields/System.Description","value":$desc},
@@ -147,9 +147,10 @@ steps:
     done
 
     # Link User Stories to Feature
+    FEATURE_API_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$FEATURE_ID"
     for STORY_ID in "${STORY_IDS[@]}"; do
       LINK_JSON=$(jq -n \
-        --arg feature_url "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$FEATURE_ID" \
+        --arg feature_url "$FEATURE_API_URL" \
         '[
           {"op":"add","path":"/relations/-","value":{"rel":"System.LinkTypes.Hierarchy-Forward","url":$feature_url}}
         ]')
@@ -160,8 +161,10 @@ steps:
         -d "$LINK_JSON" \
         "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$STORY_ID?api-version=7.0")
 
-      if [[ "$(echo "$LINK_RESPONSE" | jq -r '.id // empty')" == "null" ]]; then
+      LINK_ID=$(echo "$LINK_RESPONSE" | jq -r '.id // empty')
+      if [[ -z "$LINK_ID" ]]; then
         echo "❌ Failed to link Story ID $STORY_ID to Feature $FEATURE_ID"
+        echo "$LINK_RESPONSE"
         exit 1
       fi
       echo "   - Linked Story ID $STORY_ID to Feature $FEATURE_ID"
