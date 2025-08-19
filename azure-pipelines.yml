@@ -15,9 +15,7 @@ pool:
 
 steps:
 - script: |
-    set -u -o pipefail
-    # Optional: Temporarily disable -e for better debugging
-    set +e
+    set -euo pipefail
 
     ORG="sovereignhousingassociationvsts"
     PROJECT="Enterprise Data Warehouse"
@@ -36,26 +34,8 @@ steps:
       if [[ "$input" =~ ^[0-9]+$ ]]; then
         echo "$input"
       else
-        local id=$(echo "$input" | grep -oE '[0-9]+' | tail -1)
-        echo "$id"
+        echo "$input" | grep -oE '[0-9]+' | tail -1
       fi
-    }
-
-    function call_api() {
-      local method=$1
-      local url=$2
-      local data="${3:-}"
-      local resp
-      resp=$(curl -sS -X "$method" -H "Content-Type: application/json-patch+json" \
-        -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
-        -d "$data" "$url")
-      local code=$?
-      if [[ $code -ne 0 ]]; then
-        echo "❌ API call failed: $url"
-        echo "$resp"
-        exit 5
-      fi
-      echo "$resp"
     }
 
     # Determine Epic ID and Area Path
@@ -71,15 +51,30 @@ steps:
       fi
 
       WORK_ITEM_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$EPIC_ID?api-version=7.0"
-      RESPONSE=$(call_api GET "$WORK_ITEM_URL")
+      RESPONSE=$(curl -sS -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" "$WORK_ITEM_URL")
       AREA_PATH=$(echo "$RESPONSE" | jq -r '.fields["System.AreaPath"] // empty')
-      AREA_PATH=${AREA_PATH:-"Enterprise Data Warehouse\\Data and Analytics"}
 
-      echo "DEBUG: AREA_PATH=$AREA_PATH"
+      if [[ -z "$AREA_PATH" || "$AREA_PATH" == "null" ]]; then
+        echo "❌ Could not retrieve Area Path for work item ID $EPIC_ID"
+        exit 1
+      fi
     fi
 
-    # Feature Description
-    FEATURE_DESC="<b>Background</b><br>Provide a problem statement / summary of business issue..."
+    echo "DEBUG: AREA_PATH=$AREA_PATH"
+
+    # Helper function for API calls
+    function call_api() {
+      local method="$1"
+      local url="$2"
+      local data="$3"
+      curl -sS -X "$method" \
+        -H "Content-Type: application/json-patch+json" \
+        -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
+        -d "$data" "$url"
+    }
+
+    # JSON-safe Feature description
+    FEATURE_DESC="<b>Background</b><br>Provide a problem statement / summary of business issue to be addressed. E.g. In July 2022, Vision One performed focus group interviews with Sovereign customers...<br><b>Objective</b><br>State the business goal.<br><b>Benefit</b><br>Provide business benefits.<br><b>In scope</b><br>Overview of work."
 
     # Create Feature
     FEATURE_JSON=$(jq -n \
@@ -95,14 +90,15 @@ steps:
     FEATURE_RESPONSE=$(call_api POST "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/\$Feature?api-version=7.0" "$FEATURE_JSON")
     FEATURE_ID=$(echo "$FEATURE_RESPONSE" | jq -r '.id // empty')
 
-    if [[ -z "$FEATURE_ID" ]]; then
+    if [[ -z "$FEATURE_ID" || "$FEATURE_ID" == "null" ]]; then
       echo "❌ Failed to create Feature."
       echo "$FEATURE_RESPONSE"
       exit 1
     fi
+
     echo "✅ Created Feature $FEATURE_ID"
 
-    # User Stories
+    # User Stories array
     USER_STORIES=(
       "01 - Data Acquisition|As a data engineer, I want to ingest source system data into the data lake."
       "02 - Data Validation|As a data engineer, I want to validate data quality upon ingestion."
@@ -118,6 +114,7 @@ steps:
 
     STORY_IDS=()
 
+    # Create User Stories
     i=0
     for STORY in "${USER_STORIES[@]}"; do
       ((i++))
@@ -137,7 +134,7 @@ steps:
       STORY_RESPONSE=$(call_api POST "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/\$User%20Story?api-version=7.0" "$STORY_JSON")
       STORY_ID=$(echo "$STORY_RESPONSE" | jq -r '.id // empty')
 
-      if [[ -z "$STORY_ID" ]]; then
+      if [[ -z "$STORY_ID" || "$STORY_ID" == "null" ]]; then
         echo "❌ Failed to create User Story: $TITLE"
         echo "$STORY_RESPONSE"
         exit 1
@@ -147,24 +144,32 @@ steps:
       echo "   - Created Story $TITLE (ID $STORY_ID)"
     done
 
-    # Link User Stories to Feature
+    # Link User Stories to Feature with retries
     for STORY_ID in "${STORY_IDS[@]}"; do
-      LINK_JSON=$(jq -n \
-        --arg feature_url "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$FEATURE_ID" \
+      LINK_JSON=$(jq -n --arg feature_url "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$FEATURE_ID" \
         '[{"op":"add","path":"/relations/-","value":{"rel":"System.LinkTypes.Hierarchy-Forward","url":$feature_url}}]')
 
-      LINK_RESPONSE=$(call_api PATCH "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$STORY_ID?api-version=7.0" "$LINK_JSON")
-      LINK_ID=$(echo "$LINK_RESPONSE" | jq -r '.id // empty')
+      RETRIES=3
+      SUCCESS=0
+      for (( attempt=1; attempt<=RETRIES; attempt++ )); do
+        LINK_RESPONSE=$(call_api PATCH "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$STORY_ID?api-version=7.0" "$LINK_JSON")
+        LINK_ID=$(echo "$LINK_RESPONSE" | jq -r '.id // empty')
+        if [[ -n "$LINK_ID" ]]; then
+          SUCCESS=1
+          echo "   - Linked Story ID $STORY_ID to Feature $FEATURE_ID"
+          break
+        else
+          echo "⚠ Attempt $attempt: Failed to link Story $STORY_ID. Retrying..."
+          sleep 2
+        fi
+      done
 
-      if [[ -z "$LINK_ID" ]]; then
-        echo "❌ Failed to link Story ID $STORY_ID to Feature $FEATURE_ID"
-        exit 1
+      if [[ $SUCCESS -ne 1 ]]; then
+        echo "⚠ Failed to link Story ID $STORY_ID to Feature $FEATURE_ID after $RETRIES attempts. Skipping."
       fi
-      echo "   - Linked Story ID $STORY_ID to Feature $FEATURE_ID"
     done
 
-    echo "🎉 Feature $FEATURE_ID and ${#STORY_IDS[@]} User Stories created and linked successfully."
-
+    echo "🎉 Feature $FEATURE_ID and ${#STORY_IDS[@]} User Stories created and linked (where possible)."
   displayName: 'Create Feature and Ordered User Stories'
   env:
     SYSTEM_ACCESSTOKEN: $(System.AccessToken)
