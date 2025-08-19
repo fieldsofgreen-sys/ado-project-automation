@@ -34,13 +34,11 @@ steps:
       if [[ "$input" =~ ^[0-9]+$ ]]; then
         echo "$input"
       else
-        local id=$(echo "$input" | grep -oE '[0-9]+' | tail -1)
-        echo "$id"
+        echo "$input" | grep -oE '[0-9]+' | tail -1
       fi
     }
 
     if [[ -z "$PARENT_INPUT" ]]; then
-      echo "No parent work item specified. Defaulting to Epic ID 108342 and fixed Area Path."
       EPIC_ID="108342"
       AREA_PATH="Enterprise Data Warehouse\\Data and Analytics"
     else
@@ -60,7 +58,7 @@ steps:
       fi
     fi
 
-    FEATURE_DESC="<b>Background</b><br>Provide a problem statement / summary of business issue...<br>"
+    FEATURE_DESC="<b>Background</b><br>Provide a problem statement / summary of business issue... (truncated for brevity)"
 
     # Create Feature
     FEATURE_JSON=$(jq -n \
@@ -72,10 +70,7 @@ steps:
         {"op":"add","path":"/fields/System.Title","value":$title},
         {"op":"add","path":"/fields/System.Description","value":$desc},
         {"op":"add","path":"/fields/System.AreaPath","value":$area},
-        {"op":"add","path":"/relations/-","value":{
-          "rel":"System.LinkTypes.Hierarchy-Reverse",
-          "url": $epic_url
-        }}
+        {"op":"add","path":"/relations/-","value":{"rel":"System.LinkTypes.Hierarchy-Reverse","url":$epic_url}}
       ]')
 
     FEATURE_RESPONSE=$(curl -sS -X POST \
@@ -85,13 +80,11 @@ steps:
       "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/\$Feature?api-version=7.0")
 
     FEATURE_ID=$(echo "$FEATURE_RESPONSE" | jq -r '.id // empty')
-
     if [[ -z "$FEATURE_ID" || "$FEATURE_ID" == "null" ]]; then
       echo "❌ Failed to create Feature."
       echo "$FEATURE_RESPONSE"
       exit 1
     fi
-
     echo "✅ Created Feature $FEATURE_ID"
 
     # User Stories array
@@ -116,12 +109,11 @@ steps:
       TITLE=$(echo "$STORY" | cut -d'|' -f1)
       DESC=$(echo "$STORY" | cut -d'|' -f2-)
 
-      STACKRANK=$((1000 + i * 100))
       STORY_JSON=$(jq -n \
         --arg title "$TITLE" \
         --arg desc "$DESC" \
         --arg area "$AREA_PATH" \
-        --argjson stackrank "$STACKRANK" \
+        --arg stackrank $((1000 + i * 100)) \
         '[
           {"op":"add","path":"/fields/System.Title","value":$title},
           {"op":"add","path":"/fields/System.Description","value":$desc},
@@ -146,31 +138,27 @@ steps:
       echo "   - Created Story $TITLE (ID $STORY_ID)"
     done
 
-    # Link User Stories to Feature
-    FEATURE_API_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$FEATURE_ID"
+    # Patch Feature to add User Stories as children
+    LINK_JSON="["
     for STORY_ID in "${STORY_IDS[@]}"; do
-      LINK_JSON=$(jq -n \
-        --arg feature_url "$FEATURE_API_URL" \
-        '[
-          {"op":"add","path":"/relations/-","value":{"rel":"System.LinkTypes.Hierarchy-Forward","url":$feature_url}}
-        ]')
-
-      LINK_RESPONSE=$(curl -sS -X PATCH \
-        -H "Content-Type: application/json-patch+json" \
-        -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
-        -d "$LINK_JSON" \
-        "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$STORY_ID?api-version=7.0")
-
-      LINK_ID=$(echo "$LINK_RESPONSE" | jq -r '.id // empty')
-      if [[ -z "$LINK_ID" ]]; then
-        echo "❌ Failed to link Story ID $STORY_ID to Feature $FEATURE_ID"
-        echo "$LINK_RESPONSE"
-        exit 1
-      fi
-      echo "   - Linked Story ID $STORY_ID to Feature $FEATURE_ID"
+      LINK_JSON+=$(jq -n --arg story_url "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$STORY_ID" \
+        '{"op":"add","path":"/relations/-","value":{"rel":"System.LinkTypes.Hierarchy-Forward","url":$story_url}},')
     done
+    LINK_JSON="${LINK_JSON%,}]"  # Remove trailing comma and close array
+
+    LINK_RESPONSE=$(curl -sS -X PATCH \
+      -H "Content-Type: application/json-patch+json" \
+      -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
+      -d "$LINK_JSON" \
+      "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$FEATURE_ID?api-version=7.0")
+
+    if [[ "$(echo "$LINK_RESPONSE" | jq -r '.id // empty')" != "$FEATURE_ID" ]]; then
+      echo "❌ Failed to link User Stories to Feature $FEATURE_ID"
+      echo "$LINK_RESPONSE"
+      exit 1
+    fi
 
     echo "🎉 Feature $FEATURE_ID and ${#STORY_IDS[@]} User Stories created and linked successfully."
-  displayName: 'Create Feature and Ordered User Stories'
+  displayName: 'Create Feature and Link User Stories'
   env:
     SYSTEM_ACCESSTOKEN: $(System.AccessToken)
