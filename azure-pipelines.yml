@@ -69,7 +69,7 @@ steps:
     # Feature description (structured, HTML formatted)
     FEATURE_DESC=$(cat << 'EOF'
 <b>Background</b><br>
-Provide a problem statement / summary of business issue to be addressed. E.g. In July 2022, Vision One performed focus group interviews with Sovereign customers, resulting in the identification of 3 areas of support, with 5 segments as follows:<br>
+
 <ul>
 <li>High Support - Very vulnerable or Stressed and Stretched</li>
 <li>Medium Support - Stable striving or Stable static</li>
@@ -225,3 +225,4 @@ EOF
   displayName: 'Create Feature and Ordered User Stories'
   env:
     SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
