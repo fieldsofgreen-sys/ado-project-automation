@@ -111,24 +111,23 @@ steps:
 
     STORY_IDS=()
 
-i=0
-for STORY in "${USER_STORIES[@]}"; do
-  ((i++))
-  TITLE=$(echo "$STORY" | cut -d'|' -f1)
-  DESC=$(echo "$STORY" | cut -d'|' -f2-)
+    i=0
+    for STORY in "${USER_STORIES[@]}"; do
+      ((i++))
+      TITLE=$(echo "$STORY" | cut -d'|' -f1)
+      DESC=$(echo "$STORY" | cut -d'|' -f2-)
 
-  STORY_JSON=$(jq -n \
-    --arg title "$TITLE" \
-    --arg desc "$DESC" \
-    --arg area "$AREA_PATH" \
-    --argjson stackrank $((1000 + i * 100)) \
-    '[
-      {"op":"add","path":"/fields/System.Title","value":$title},
-      {"op":"add","path":"/fields/System.Description","value":$desc},
-      {"op":"add","path":"/fields/System.AreaPath","value":$area},
-      {"op":"add","path":"/fields/Microsoft.VSTS.Common.StackRank","value":$stackrank}
-    ]')
-
+      STORY_JSON=$(jq -n \
+        --arg title "$TITLE" \
+        --arg desc "$DESC" \
+        --arg area "$AREA_PATH" \
+        --arg stackrank $((1000 + i * 100)) \
+        '[
+          {"op":"add","path":"/fields/System.Title","value":$title},
+          {"op":"add","path":"/fields/System.Description","value":$desc},
+          {"op":"add","path":"/fields/System.AreaPath","value":$area},
+          {"op":"add","path":"/fields/Microsoft.VSTS.Common.StackRank","value":$stackrank}
+        ]')
 
       STORY_RESPONSE=$(curl -sS -X POST \
         -H "Content-Type: application/json-patch+json" \
