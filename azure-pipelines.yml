@@ -15,7 +15,9 @@ pool:
 
 steps:
 - script: |
-    set -euo pipefail
+    set -u -o pipefail
+    # Optional: Temporarily disable -e for better debugging
+    set +e
 
     ORG="sovereignhousingassociationvsts"
     PROJECT="Enterprise Data Warehouse"
@@ -39,6 +41,24 @@ steps:
       fi
     }
 
+    function call_api() {
+      local method=$1
+      local url=$2
+      local data="${3:-}"
+      local resp
+      resp=$(curl -sS -X "$method" -H "Content-Type: application/json-patch+json" \
+        -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
+        -d "$data" "$url")
+      local code=$?
+      if [[ $code -ne 0 ]]; then
+        echo "❌ API call failed: $url"
+        echo "$resp"
+        exit 5
+      fi
+      echo "$resp"
+    }
+
+    # Determine Epic ID and Area Path
     if [[ -z "$PARENT_INPUT" ]]; then
       echo "No parent work item specified. Defaulting to Epic ID 108342 and fixed Area Path."
       EPIC_ID="108342"
@@ -51,17 +71,15 @@ steps:
       fi
 
       WORK_ITEM_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$EPIC_ID?api-version=7.0"
-      RESPONSE=$(curl -sS -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" "$WORK_ITEM_URL")
+      RESPONSE=$(call_api GET "$WORK_ITEM_URL")
       AREA_PATH=$(echo "$RESPONSE" | jq -r '.fields["System.AreaPath"] // empty')
+      AREA_PATH=${AREA_PATH:-"Enterprise Data Warehouse\\Data and Analytics"}
 
-      if [[ -z "$AREA_PATH" || "$AREA_PATH" == "null" ]]; then
-        echo "❌ Could not retrieve Area Path for work item ID $EPIC_ID"
-        exit 1
-      fi
+      echo "DEBUG: AREA_PATH=$AREA_PATH"
     fi
 
-    # JSON-safe Feature description
-    FEATURE_DESC="<b>Background</b><br>Provide a problem statement / summary of business issue to be addressed. E.g. In July 2022, Vision One performed focus group interviews with Sovereign customers, resulting in the identification of 3 areas of support, with 5 segments as follows:<br><ul><li>High Support - Very vulnerable or Stressed and Stretched</li><li>Medium Support - Stable striving or Stable static</li><li>Low Support - Inherently independent</li></ul><br><b>Objective</b><br>State what the business goal is of this project. E.g. Sovereign are working with Vision One to define customer segments and personas, with a view to assisting customer facing teams to shape their services based on customer need.<br><br><b>Benefit</b><br>Provide a list of the business benefits this project will provide. NOTE: these will be used to measure the success of the project. E.g. Initially the results will help identify customers applicable for assistance via the Customer Support Fund.<br><br><b>In scope</b><br>Provide an overview of the work the project will include. E.g. As a first pass at using internal data to help identify customers in these groups, we're focussing on Income data, to include the following:<br><ul><li>Current balance data and arrears history (12-18 months), reviewing method of payment - direct vs indirect payers</li><li>Benefit claimants, identified as claiming UC (check HB numbers)</li><li>Vulnerability flags to identify higher support needs, in any household member, identifying if these are with children</li><li>Data from CRM to identify those already in receipt of tenancy /income support</li><li>Fuel voucher provision (not centrally held today)</li><li>Initial customer data from CoRE - Howard to confirm areas of interest</li></ul><br>It's suggested high support customers are likely to be on an annual income of £20K or less and mainly claiming benefits."
+    # Feature Description
+    FEATURE_DESC="<b>Background</b><br>Provide a problem statement / summary of business issue..."
 
     # Create Feature
     FEATURE_JSON=$(jq -n \
@@ -69,33 +87,22 @@ steps:
       --arg area "$AREA_PATH" \
       --arg epic_url "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$EPIC_ID" \
       --arg desc "$FEATURE_DESC" \
-      '[ 
-        {"op":"add","path":"/fields/System.Title","value":$title},
+      '[{"op":"add","path":"/fields/System.Title","value":$title},
         {"op":"add","path":"/fields/System.Description","value":$desc},
         {"op":"add","path":"/fields/System.AreaPath","value":$area},
-        {"op":"add","path":"/relations/-","value":{
-          "rel":"System.LinkTypes.Hierarchy-Reverse",
-          "url": $epic_url
-        }}
-      ]')
+        {"op":"add","path":"/relations/-","value":{"rel":"System.LinkTypes.Hierarchy-Reverse","url":$epic_url}}]')
 
-    FEATURE_RESPONSE=$(curl -sS -X POST \
-      -H "Content-Type: application/json-patch+json" \
-      -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
-      -d "$FEATURE_JSON" \
-      "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/Feature?api-version=7.0")
-
+    FEATURE_RESPONSE=$(call_api POST "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/\$Feature?api-version=7.0" "$FEATURE_JSON")
     FEATURE_ID=$(echo "$FEATURE_RESPONSE" | jq -r '.id // empty')
 
-    if [[ -z "$FEATURE_ID" || "$FEATURE_ID" == "null" ]]; then
+    if [[ -z "$FEATURE_ID" ]]; then
       echo "❌ Failed to create Feature."
       echo "$FEATURE_RESPONSE"
       exit 1
     fi
-
     echo "✅ Created Feature $FEATURE_ID"
 
-    # User Stories array
+    # User Stories
     USER_STORIES=(
       "01 - Data Acquisition|As a data engineer, I want to ingest source system data into the data lake."
       "02 - Data Validation|As a data engineer, I want to validate data quality upon ingestion."
@@ -121,25 +128,18 @@ steps:
         --arg title "$TITLE" \
         --arg desc "$DESC" \
         --arg area "$AREA_PATH" \
-        --argjson stackrank $((1000 + i * 100)) \
-        '[ 
-          {"op":"add","path":"/fields/System.Title","value":$title},
+        --arg stackrank $((1000 + i * 100)) \
+        '[{"op":"add","path":"/fields/System.Title","value":$title},
           {"op":"add","path":"/fields/System.Description","value":$desc},
           {"op":"add","path":"/fields/System.AreaPath","value":$area},
-          {"op":"add","path":"/fields/Microsoft.VSTS.Common.StackRank","value":$stackrank}
-        ]')
+          {"op":"add","path":"/fields/Microsoft.VSTS.Common.StackRank","value":$stackrank}]')
 
-      STORY_RESPONSE=$(curl -sS -X POST \
-        -H "Content-Type: application/json-patch+json" \
-        -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
-        -d "$STORY_JSON" \
-        "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/User%20Story?api-version=7.0")
-
-      echo "DEBUG: $STORY_RESPONSE"
-
+      STORY_RESPONSE=$(call_api POST "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/\$User%20Story?api-version=7.0" "$STORY_JSON")
       STORY_ID=$(echo "$STORY_RESPONSE" | jq -r '.id // empty')
-      if [[ -z "$STORY_ID" || "$STORY_ID" == "null" ]]; then
+
+      if [[ -z "$STORY_ID" ]]; then
         echo "❌ Failed to create User Story: $TITLE"
+        echo "$STORY_RESPONSE"
         exit 1
       fi
 
@@ -151,17 +151,12 @@ steps:
     for STORY_ID in "${STORY_IDS[@]}"; do
       LINK_JSON=$(jq -n \
         --arg feature_url "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$FEATURE_ID" \
-        '[ 
-          {"op":"add","path":"/relations/-","value":{"rel":"System.LinkTypes.Hierarchy-Forward","url":$feature_url}}
-        ]')
+        '[{"op":"add","path":"/relations/-","value":{"rel":"System.LinkTypes.Hierarchy-Forward","url":$feature_url}}]')
 
-      LINK_RESPONSE=$(curl -sS -X PATCH \
-        -H "Content-Type: application/json-patch+json" \
-        -H "Authorization: Bearer $SYSTEM_ACCESSTOKEN" \
-        -d "$LINK_JSON" \
-        "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$STORY_ID?api-version=7.0")
+      LINK_RESPONSE=$(call_api PATCH "https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$STORY_ID?api-version=7.0" "$LINK_JSON")
+      LINK_ID=$(echo "$LINK_RESPONSE" | jq -r '.id // empty')
 
-      if [[ "$(echo "$LINK_RESPONSE" | jq -r '.id // empty')" == "null" ]]; then
+      if [[ -z "$LINK_ID" ]]; then
         echo "❌ Failed to link Story ID $STORY_ID to Feature $FEATURE_ID"
         exit 1
       fi
@@ -169,6 +164,7 @@ steps:
     done
 
     echo "🎉 Feature $FEATURE_ID and ${#STORY_IDS[@]} User Stories created and linked successfully."
+
   displayName: 'Create Feature and Ordered User Stories'
   env:
     SYSTEM_ACCESSTOKEN: $(System.AccessToken)
