@@ -112,7 +112,9 @@ steps:
 
     EPIC_URL="https://dev.azure.com/$ORG/$PROJECT_URL_ENCODED/_apis/wit/workitems/$EPIC_ID"
 
-    FEATURE_DESC="<b>Background</b><br>
+    # Use heredoc for multi-line HTML description
+    read -r -d '' FEATURE_DESC << 'EOF'
+<b>Background</b><br>
 Provide a problem statement / summary of business issue to be addressed. E.g. In July 2022, Vision One performed focus group interviews with Sovereign customers, resulting in the identification of 3 areas of support, with 5 segments as follows:<br><ul>
 <li>High Support - Very vulnerable or Stressed and Stretched</li>
 <li>Medium Support - Stable striving or Stable static</li>
@@ -131,7 +133,8 @@ Provide an overview of the work the project will include. E.g. As a first pass a
 <li>Fuel voucher provision (not centrally held today)</li>
 <li>Initial customer data from CoRE - Howard to confirm areas of interest</li>
 </ul><br>
-It's suggested high support customers are likely to be on an annual income of £20K or less and mainly claiming benefits."
+It's suggested high support customers are likely to be on an annual income of £20K or less and mainly claiming benefits.
+EOF
 
     FEATURE_JSON=$(jq -n \
       --arg title "$FEATURE_TITLE" \
